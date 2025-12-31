@@ -1,69 +1,62 @@
 import os
 import requests
+import time
+import threading
+from flask import Flask
 from pymongo import MongoClient
 from datetime import datetime
 
 # --- SETTINGS ---
-MONGO_URI = os.getenv("MONGO_URI") 
+MONGO_URI = "your_mongodb_uri_here"
 DB_NAME = "bet9ja_virtuals"
 COLLECTION_NAME = "weekly_snapshots"
 
-API_URL = "https://stadium-tv-api.bet9ja.com/game/standings/3/1"
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Referer": "https://leagueplus-tv.bet9ja.com/"
-}
+# --- THE HEARTBEAT SERVER ---
+app = Flask(__name__)
 
-def parse_league_snapshot(raw_string):
-    if not raw_string: return {}
-    teams_data = raw_string.split('|')
-    snapshot = {}
-    for index, team_entry in enumerate(teams_data):
-        parts = team_entry.split('-')
-        if len(parts) >= 3:
-            team_code = parts[0]
-            snapshot[team_code] = {
-                "position": index + 1,
-                "points": int(parts[1]),
-                "result": parts[2][0] if parts[2] else None
-            }
-    return snapshot
+@app.route('/')
+def home():
+    return "Scraper is Alive and Punctual!"
 
-def main():
-    if not MONGO_URI:
-        print("Error: MONGO_URI environment variable not set.")
-        return
+def run_flask():
+    app.run(host='0.0.0.0', port=10000)
 
+# --- THE SCRAPER LOGIC ---
+def run_scraper():
     client = MongoClient(MONGO_URI)
     db = client[DB_NAME]
     collection = db[COLLECTION_NAME]
-
     try:
-        response = requests.get(API_URL, headers=HEADERS, timeout=15)
+        response = requests.get("https://stadium-tv-api.bet9ja.com/game/standings/3/1", timeout=15)
         if response.status_code == 200:
-            data_payload = response.json().get('data', {})
-            season = data_payload.get('season')
-            week = data_payload.get('week')
+            data = response.json().get('data', {})
+            season, week = data.get('season'), data.get('week')
             unique_id = f"{season}_{week}"
-
-            league_data = parse_league_snapshot(data_payload.get('value', ""))
             
-            document = {
-                "_id": unique_id,
-                "season": season,
-                "week": week,
-                "scraped_at": datetime.now(),
-                "teams": league_data
-            }
+            teams_data = data.get('value', "").split('|')
+            league_snapshot = {t.split('-')[0]: {"pos": i+1, "pts": int(t.split('-')[1])} 
+                               for i, t in enumerate(teams_data) if len(t.split('-')) >= 3}
 
-            # This will save if new, or do nothing if it already exists
+            document = {"_id": unique_id, "season": season, "week": week, 
+                        "scraped_at": datetime.now(), "teams": league_snapshot}
+            
             collection.replace_one({"_id": unique_id}, document, upsert=True)
-            print(f"Successfully processed Season {season} Week {week}")
-        else:
-            print(f"API Error: {response.status_code}")
-
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Saved: S{season} W{week}")
     except Exception as e:
         print(f"Error: {e}")
+    finally:
+        client.close()
+
+def scraper_loop():
+    while True:
+        run_scraper()
+        now = datetime.now()
+        seconds_to_wait = 300 - (now.minute % 5 * 60 + now.second)
+        if seconds_to_wait < 10: seconds_to_wait += 300 
+        time.sleep(seconds_to_wait)
 
 if __name__ == "__main__":
-    main()
+    # Start the scraper in a separate thread
+    threading.Thread(target=scraper_loop, daemon=True).start()
+    # Start the web server
+    run_flask()
