@@ -59,16 +59,15 @@ def run_scraper():
                 if len(parts) >= 3:
                     team_code = parts[0]   # e.g., "LIV"
                     points = int(parts[1]) # e.g., 45
-                    history = parts[2]    # e.g., "WDLWW"
+                    history = parts[2]     # e.g., "WDLWW"
                     
-                    # The LAST character in the history string is the result of the CURRENT week
-                    current_result = history[-1] if history else None
+                    # Corrected: Grab the FIRST character (the most recent match)
+                    current_result = history[0] if history else None
                     
                     league_snapshot[team_code] = {
                         "pos": i + 1,
                         "pts": points,
-                        "result": current_result, # W, D, or L
-                        # "recent_form": history    # The full string (e.g., "WDLWW")
+                        "result": current_result  # Now correctly taking the leftmost result
                     }
 
             document = {
