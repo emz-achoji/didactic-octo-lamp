@@ -62,13 +62,13 @@ def run_scraper():
                     history = parts[2]    # e.g., "WDLWW"
                     
                     # The LAST character in the history string is the result of the CURRENT week
-                    current_result = history[-1] if history else None
+                    # current_result = history[-1] if history else None
                     
                     league_snapshot[team_code] = {
                         "pos": i + 1,
                         "pts": points,
                         "result": current_result, # W, D, or L
-                        "recent_form": history    # The full string (e.g., "WDLWW")
+                        # "recent_form": history    # The full string (e.g., "WDLWW")
                     }
 
             document = {
