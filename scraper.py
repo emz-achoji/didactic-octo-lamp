@@ -7,7 +7,7 @@ from pymongo import MongoClient
 from datetime import datetime
 
 # --- SETTINGS ---
-MONGO_URI = "your_mongodb_uri_here"
+MONGO_URI = "MONGO_URI"
 DB_NAME = "bet9ja_virtuals"
 COLLECTION_NAME = "weekly_snapshots"
 
