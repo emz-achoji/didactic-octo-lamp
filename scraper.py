@@ -27,19 +27,10 @@ def run_flask():
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 def run_scraper():
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Attempting to scrape...", flush=True)
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Attempting to scrape with Results (W/D/L)...", flush=True)
     
-    if not MONGO_URI:
-        print("CRITICAL: MONGO_URI is missing from environment variables!", flush=True)
-        return
-
-    # 1. Setup a Persistent Session with Retries
     session = requests.Session()
-    retry_strategy = Retry(
-        total=3,                # Try 3 times before giving up
-        backoff_factor=2,       # Wait 2s, 4s, 8s between retries
-        status_forcelist=[429, 500, 502, 503, 504], # Retry on these server errors
-    )
+    retry_strategy = Retry(total=3, backoff_factor=2, status_forcelist=[429, 500, 502, 503, 504])
     session.mount("https://", HTTPAdapter(max_retries=retry_strategy))
 
     try:
@@ -47,7 +38,6 @@ def run_scraper():
         db = client[DB_NAME]
         collection = db[COLLECTION_NAME]
         
-        # 2. Increased Timeout (Connect: 10s, Read: 30s)
         response = session.get(
             "https://stadium-tv-api.bet9ja.com/game/standings/3/1", 
             headers={"User-Agent": "Mozilla/5.0"},
@@ -59,9 +49,27 @@ def run_scraper():
             season, week = data.get('season'), data.get('week')
             unique_id = f"{season}_{week}"
             
-            teams_data = data.get('value', "").split('|')
-            league_snapshot = {t.split('-')[0]: {"pos": i+1, "pts": int(t.split('-')[1])} 
-                               for i, t in enumerate(teams_data) if len(t.split('-')) >= 3}
+            # The "value" string looks like: "LIV-45-WDLWW|CHE-42-LLWDW|..."
+            raw_value = data.get('value', "")
+            teams_data = raw_value.split('|')
+            
+            league_snapshot = {}
+            for i, team_entry in enumerate(teams_data):
+                parts = team_entry.split('-')
+                if len(parts) >= 3:
+                    team_code = parts[0]   # e.g., "LIV"
+                    points = int(parts[1]) # e.g., 45
+                    history = parts[2]    # e.g., "WDLWW"
+                    
+                    # The LAST character in the history string is the result of the CURRENT week
+                    current_result = history[-1] if history else None
+                    
+                    league_snapshot[team_code] = {
+                        "pos": i + 1,
+                        "pts": points,
+                        "result": current_result, # W, D, or L
+                        "recent_form": history    # The full string (e.g., "WDLWW")
+                    }
 
             document = {
                 "_id": unique_id, 
@@ -72,18 +80,14 @@ def run_scraper():
             }
             
             collection.replace_one({"_id": unique_id}, document, upsert=True)
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] SUCCESS: Saved S{season} W{week}", flush=True)
-        else:
-            print(f"API ERROR: HTTP {response.status_code}", flush=True)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] SUCCESS: Saved S{season} W{week} with Results.", flush=True)
             
-    except requests.exceptions.Timeout:
-        print("SCRAPER ERROR: Request timed out after retries. Server might be down.", flush=True)
     except Exception as e:
         print(f"SCRAPER ERROR: {e}", flush=True)
     finally:
         session.close()
         client.close()
-
+        
 def scraper_loop():
     print("Background scraper thread started.", flush=True)
     while True:
