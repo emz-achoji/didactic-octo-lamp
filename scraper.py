@@ -50,7 +50,7 @@ def health_check():
         "time": datetime.now(timezone.utc).isoformat()
     }
 
-def fetch_with_retry(session, url, headers, max_retries=3, backoff_factor=2, status_forcelist=(429, 500, 502, 503, 504), timeout=(15,30):
+def fetch_with_retry(session, url, headers, max_retries=3, backoff_factor=2, status_forcelist=(429, 500, 502, 503, 504), timeout=(15,30)):
     """Retries HTTP calls with exponential backoff to ensure network stability on Render."""
     for attempt in range(max_retries + 1):
         try:
