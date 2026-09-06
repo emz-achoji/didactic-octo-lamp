@@ -10,7 +10,7 @@ from curl_cffi import requests as crequests
 MONGO_URI = os.getenv("MONGO_URI")
 DB_NAME = "BJ_ml_factory"
 
-# Distinct collection names for Competition 2 (Spanish League)
+# Distinct collection names for Competition 2
 COL_RAW = "raw_payloads_c2"      
 COL_MATCH = "match_records_c2"   
 
@@ -50,10 +50,29 @@ def health_check():
         "time": datetime.now(timezone.utc).isoformat()
     }
 
+def fetch_with_retry(session, url, headers, max_retries=3, backoff_factor=2, status_forcelist=(429, 500, 502, 503, 504), timeout=30):
+    """Retries HTTP calls with exponential backoff to ensure network stability on Render."""
+    for attempt in range(max_retries + 1):
+        try:
+            resp = session.get(url, headers=headers, timeout=timeout)
+            if resp.status_code in status_forcelist and attempt < max_retries:
+                sleep_time = backoff_factor ** attempt
+                print(f"[Retry {attempt + 1}/{max_retries}] HTTP {resp.status_code}. Waiting {sleep_time}s...", flush=True)
+                time.sleep(sleep_time)
+                continue
+            return resp
+        except Exception as e:
+            if attempt < max_retries:
+                sleep_time = backoff_factor ** attempt
+                print(f"[Retry {attempt + 1}/{max_retries}] Connection Error: {e}. Waiting {sleep_time}s...", flush=True)
+                time.sleep(sleep_time)
+            else:
+                raise e
+
 def fetch_current_standings(session, headers):
     try:
-        resp = session.get(STANDINGS_ENDPOINT, headers=headers, timeout=30)
-        if resp.status_code == 200:
+        resp = fetch_with_retry(session, STANDINGS_ENDPOINT, headers=headers)
+        if resp and resp.status_code == 200:
             data = resp.json().get('data', {})
             raw_value = data.get('value', "")
             teams_data = raw_value.split('|')
@@ -66,7 +85,8 @@ def fetch_current_standings(session, headers):
                     standings_map[team_code] = {"position": i + 1, "points": points}
             return standings_map
         else:
-            print(f"Standings Fetch Failed: HTTP {resp.status_code}", flush=True)
+            status = resp.status_code if resp else "No Response"
+            print(f"Standings Fetch Failed: HTTP {status}", flush=True)
     except Exception as e:
         print(f"Standings Fetch Error: {e}", flush=True)
     return {}
@@ -99,10 +119,11 @@ def run_pipeline():
 
     try:
         standings = fetch_current_standings(session, headers)
-        resp = session.get(ROUND_ENDPOINT, headers=headers, timeout=30)
+        resp = fetch_with_retry(session, ROUND_ENDPOINT, headers=headers)
         
-        if resp.status_code != 200:
-            print(f"Round Fetch Failed: HTTP Status {resp.status_code}", flush=True)
+        if not resp or resp.status_code != 200:
+            status = resp.status_code if resp else "No Response"
+            print(f"Round Fetch Failed: HTTP Status {status}", flush=True)
             return
 
         data = resp.json().get('data', {})
