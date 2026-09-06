@@ -1,4 +1,3 @@
-requests
-pymongo
 flask
-gunicorn
+pymongo[srv]
+curl-cffi
